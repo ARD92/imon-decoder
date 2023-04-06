@@ -108,30 +108,47 @@ func decodeGtp(payload []byte) {
     	}
 
     	// Outer Iplayer
-    	ipLayer := gtpPacket.Layer(layers.LayerTypeIPv4)
-    	if ipLayer != nil {
-    	    	ipPacket,_ := ipLayer.(*layers.IPv4)
-    	    	fmt.Println("Original pkt Source IP: ", ipPacket.SrcIP)
-    	    	fmt.Println("Original pkt Dest IP: ", ipPacket.DstIP)
-    	    	fmt.Println("Original pkt Protocol: ", ipPacket.Protocol)
+    	outerIpLayer := gtpPacket.Layer(layers.LayerTypeIPv4)
+    	if outerIpLayer != nil {
+    	    	oIpPacket,_ := outerIpLayer.(*layers.IPv4)
+    	    	fmt.Println("Original pkt Source IP: ", oIpPacket.SrcIP)
+    	    	fmt.Println("Original pkt Dest IP: ", oIpPacket.DstIP)
+    	    	fmt.Println("Original pkt Protocol: ", oIpPacket.Protocol)
 	}
 
-	udpLayer := gtpPacket.Layer(layers.LayerTypeUDP)
+	outerUdpLayer := gtpPacket.Layer(layers.LayerTypeUDP)
     	//var originalUdpPort layers.UDPPort
-    	if udpLayer != nil {
-        	udp,_ := udpLayer.(*layers.UDP)
-        	fmt.Println("Original pkt Source Port: ", udp.SrcPort)
-        	fmt.Println("Original pkt Dest Port: ", udp.DstPort)
+    	if outerUdpLayer != nil {
+        	oUdp,_ := outerUdpLayer.(*layers.UDP)
+        	fmt.Println("Original pkt Source Port: ", oUdp.SrcPort)
+        	fmt.Println("Original pkt Dest Port: ", oUdp.DstPort)
     	}
 
 	gtpLayer := gtpPacket.Layer(layers.LayerTypeGTPv1U)
+	//gtpLayer := gopacket.NewPacket(payload, layers.LayerTypeGTPv1U, gopacket.Default)
 	if gtpLayer != nil {
 		fmt.Println("============ GTP Layer ============= \n")
 		gtp,_ := gtpLayer.(*layers.GTPv1U)
 		fmt.Println("TEID: ", gtp.TEID)
+    		nextLayer := gtp.NextLayerType()
+		if nextLayer == layers.LayerTypeIPv4 {
+			gpayload := gtp.LayerPayload()
+			fmt.Println("Inner pkt Source IP: ", Ipv4Decode(gpayload[12:16]))
+			fmt.Println("Inner pkt Dest IP: ", Ipv4Decode(gpayload[16:20]))
+			fmt.Println("Inner pkt Protocol: ", PortDecode(gpayload[9:10]))
+		}
+
 	}
 
-	/*iflow.OuterDstMac = 
+	/*innerUdpLayer := gtpLayer.Layer(layers.LayerTypeUDP)
+    	//var originalUdpPort layers.UDPPort
+    	if innerUdpLayer != nil {
+        	iUdp,_ := innerUdpLayer.(*layers.UDP)
+        	fmt.Println("Inner pkt Source Port: ", iUdp.SrcPort)
+        	fmt.Println("Inner pkt Dest Port: ", iUdp.DstPort)
+    	}
+	
+	iflow.OuterDstMac = 
 	iflow.OuterSrcMac = 
 	iflow.GtpTeid = PortDecode(payload[6:12]) 
 	iflow.GtpIpSrcAddr = Ipv4Decode(payload[]) 
