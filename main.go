@@ -63,7 +63,7 @@ type IpfixData struct {
 	EgressIntf string
 	IngressIntf string
 	Direction string
-	DataLinkSize string
+	DataLinkSize int64
 }
 
 type Ipv4Flow struct {
@@ -77,7 +77,8 @@ type Ipv4Flow struct {
 
 }
 
-func Ipv4Decode(input []byte) string {
+// Parse IPv4 bytes and return string value in dotted decimal
+func parseIpv4Bytes(input []byte) string {
     	var val [4]string
     	for i:=0;i<len(input);i++ {
     	    hexval := hex.EncodeToString(input[i:i+1])
@@ -88,7 +89,7 @@ func Ipv4Decode(input []byte) string {
 }
 
 // Decode port bytes and return an int64 value
-func PortDecode(input []byte) int64 {
+func parsePortBytes(input []byte) int64 {
     	hexval := hex.EncodeToString(input)
     	dval,_ := strconv.ParseInt(hexval, 16, 64)
     	return dval
@@ -135,12 +136,17 @@ func decodeGtp(payload []byte) {
     		nextLayer := gtp.NextLayerType()
 		if nextLayer == layers.LayerTypeIPv4 {
 			gpayload := gtp.LayerPayload()
-			gtpFlow.GtpIpSrcAddr = Ipv4Decode(gpayload[12:16])
-			gtpFlow.GtpIpDstAddr = Ipv4Decode(gpayload[16:20])
-			gtpFlow.GtpProtocol = PortDecode(gpayload[9:10])
-			gtpFlow.GtpL4SrcPort = PortDecode(gpayload[20:22])
-			gtpFlow.GtpL4DstPort = PortDecode(gpayload[22:24])
-			fmt.Println(gtpFlow)
+			gtpFlow.GtpIpSrcAddr = parseIpv4Bytes(gpayload[12:16])
+			gtpFlow.GtpIpDstAddr = parseIpv4Bytes(gpayload[16:20])
+			gtpFlow.GtpProtocol = parsePortBytes(gpayload[9:10])
+			gtpFlow.GtpL4SrcPort = parsePortBytes(gpayload[20:22])
+			gtpFlow.GtpL4DstPort = parsePortBytes(gpayload[22:24])
+			log.Println("Gtp flow: ", gtpFlow)
+			fmt.Println("InnerSourceAddr : ", gtpFlow.GtpIpSrcAddr)
+			fmt.Println("InnerDestAddr : ", gtpFlow.GtpIpDstAddr)
+			fmt.Println("InnerSourcePort : ", gtpFlow.GtpL4SrcPort)
+			fmt.Println("InnerDestPort : ", gtpFlow.GtpL4DstPort)
+			fmt.Println("InnerProtocol : ", gtpFlow.GtpProtocol)
 			fmt.Println("----------")
 		}
 
@@ -153,10 +159,11 @@ func decodeIpfix(payload []byte) {
 	var iflow IpfixData
 	iFixVersion := payload[0:2]
 	if hex.EncodeToString(iFixVersion) == "000a" {
-		fmt.Println("Decoding IPFIX packet...")
+		log.Println("Decoding IPFIX packet...")
 		iFixFlowSetId := hex.EncodeToString(payload[16:18])
 		//fmt.Println(iFixFlowSetId)
 		if iFixFlowSetId == "0002" {
+			log.Println(" received template packet ....\n")
 			fmt.Println(" received template packet ....\n")
 			template.Version = hex.EncodeToString(iFixVersion)
 			template.Length = hex.EncodeToString(payload[2:4])
@@ -166,27 +173,30 @@ func decodeIpfix(payload []byte) {
 			template.FlowsetId = hex.EncodeToString(payload[16:18])
 			template.Flowlen = hex.EncodeToString(payload[18:20])
 			template.TemplateId = hex.EncodeToString(payload[20:22])
-			//fmt.Println(template)
+			log.Println("template hex bytes: ",template)
 		} else if iFixFlowSetId == template.TemplateId {
-			fmt.Println("Decoding inline monitoring flow packet... \n")
+			log.Println("Decoding inline monitoring flow packet... \n")
 			//TO_DO: Add check for Inner IP version before decoding to handle v4 vs v6 versions
 			iflow.EgressIntf = hex.EncodeToString(payload[20:24])
 			iflow.IngressIntf = hex.EncodeToString(payload[24:28])
 			iflow.Direction = hex.EncodeToString(payload[28:29])
-			iflow.DataLinkSize = hex.EncodeToString(payload[29:31])
+			iflow.DataLinkSize = parsePortBytes(payload[29:31])
+			log.Println("flow data hexbytes: ",iflow)
 			fmt.Println("======== Flow data ============\n")
 			fmt.Println("EgressIntf: ", iflow.EgressIntf)
 			fmt.Println("IngressIntf: ", iflow.IngressIntf)
 			fmt.Println("Direction: ", iflow.Direction)
 			fmt.Println("DataLinkSize: ", iflow.DataLinkSize)
-			if iflow.DataLinkSize != "" {
+			if iflow.DataLinkSize != 0 {
 				//Inner Packet to parse 
 				decodeGtp(payload[32:])
 			}
 		} else {
+			log.Println("Unable to decode Ipfix Packet... \n")
 			fmt.Println("Unable to decode Ipfix Packet... \n")
 		}
 	} else {
+		log.Println("Not an IPFIX packet ... \n")
 		fmt.Println("Not an IPFIX packet ... \n")
 	}
 }
@@ -200,7 +210,7 @@ func decodePacket(packet gopacket.Packet) {
         	uDestPort = udp.DstPort
     	}
     	if uDestPort == 1000 {
-        	fmt.Println("received ipfix packet...")
+        	log.Println("received ipfix packet...")
         	appLayer := packet.ApplicationLayer()
         	if appLayer != nil {
             		payload := appLayer.Payload()
