@@ -14,7 +14,7 @@ package main
 
 import (
 	"fmt"
-	//"net"
+	"net"
 	"encoding/hex"
 	 "github.com/google/gopacket"
 	 "github.com/google/gopacket/layers"
@@ -34,30 +34,8 @@ var (
     err         error
     timeout     time.Duration = 5 * time.Second
     handle      *pcap.Handle
+    template	IpfixTempData
 )
-
-// Decode bytes and return a dotted val of IP address
-func Ipv4Decode(input []byte) string {
-    var val [4]string
-    for i:=0;i<len(input);i++ {
-        hexval := hex.EncodeToString(input[i:i+1])
-        dval,_ := strconv.ParseInt(hexval, 16, 64)
-        val[i] = strconv.FormatInt(dval,10)
-    }
-    return val[0]+"."+val[1]+"."+val[2]+"."+val[3]
-}
-
-// Decode port bytes and return an int64 value
-func PortDecode(input []byte) int64 {
-    hexval := hex.EncodeToString(input)
-    dval,_ := strconv.ParseInt(hexval, 16, 64)
-    return dval
-}
-
-/*func MacDecode(input []byte) string {
-	options := gopacket.SerializeOptions{}
-	buffer := gopacket.NewSerializeBuffer()
-}*/
 
 // Inline monitoring Ipfix template data 
 type IpfixTempData struct {
@@ -73,14 +51,10 @@ type IpfixTempData struct {
 
 // IPFIX Flow data definition
 type IpfixGtpFlowData struct {
-	OuterSrcIp string
-	OuterDstIp string
-	OuterSrcPort int64
-	OuterDstPort int64
-	GtpTeid string
+	GtpTeid uint32
    	GtpIpSrcAddr string
     	GtpIpDstAddr string
-    	GtpProtocol int64
+    	GtpProtocol int64 
     	GtpL4SrcPort int64
     	GtpL4DstPort int64
 }
@@ -92,70 +66,86 @@ type IpfixData struct {
 	DataLinkSize string
 }
 
-var template IpfixTempData
+type Ipv4Flow struct {
+	Srcmac net.HardwareAddr
+	Dstmac net.HardwareAddr
+	SrcIp net.IP
+	DstIp net.IP
+	SrcPort layers.UDPPort
+	DstPort layers.UDPPort
+	Protocol layers.IPProtocol
+
+}
+
+func Ipv4Decode(input []byte) string {
+    	var val [4]string
+    	for i:=0;i<len(input);i++ {
+    	    hexval := hex.EncodeToString(input[i:i+1])
+    	    dval,_ := strconv.ParseInt(hexval, 16, 64)
+    	    val[i] = strconv.FormatInt(dval,10)
+    	}
+    	return val[0]+"."+val[1]+"."+val[2]+"."+val[3]
+}
+
+// Decode port bytes and return an int64 value
+func PortDecode(input []byte) int64 {
+    	hexval := hex.EncodeToString(input)
+    	dval,_ := strconv.ParseInt(hexval, 16, 64)
+    	return dval
+}
+
+
+func decodeIpv4(payload []byte) (gopacket.Packet, Ipv4Flow) {
+	var v4flow Ipv4Flow
+	packet := gopacket.NewPacket(payload,layers.LayerTypeEthernet,gopacket.Default)
+    	ethLayer := packet.Layer(layers.LayerTypeEthernet)
+    	if ethLayer != nil {
+    	    	eth,_ := ethLayer.(*layers.Ethernet)
+		v4flow.Srcmac = eth.SrcMAC
+		v4flow.Dstmac = eth.DstMAC
+    	}
+
+    	ipLayer := packet.Layer(layers.LayerTypeIPv4)
+    	if ipLayer != nil {
+    	    	ipacket,_ := ipLayer.(*layers.IPv4)
+		v4flow.SrcIp = ipacket.SrcIP
+		v4flow.DstIp = ipacket.DstIP
+		v4flow.Protocol = ipacket.Protocol
+	}
+
+	udpLayer := packet.Layer(layers.LayerTypeUDP)
+    	if udpLayer != nil {
+        	udp,_ := udpLayer.(*layers.UDP)
+		v4flow.SrcPort = udp.SrcPort
+		v4flow.DstPort = udp.DstPort
+    	}
+	return packet, v4flow
+}
 
 // Decode GTP-U packet
 func decodeGtp(payload []byte) {
-	fmt.Println("decoding GTP packet.. \n")
-	//var iflow IpfixGtpFlowData
-	gtpPacket := gopacket.NewPacket(payload,layers.LayerTypeEthernet,gopacket.Default)
-    	ethLayer := gtpPacket.Layer(layers.LayerTypeEthernet)
-    	if ethLayer != nil {
-    	    	gtpPacket,_ := ethLayer.(*layers.Ethernet)
-    	    	fmt.Println("Original pkt Outer Source Mac: ", gtpPacket.SrcMAC)
-    	    	fmt.Println("Original pkt Dest Mac: ", gtpPacket.DstMAC)
-    	    	fmt.Println("Original pkt Eth Type: ", gtpPacket.EthernetType)
-    	}
-
-    	// Outer Iplayer
-    	outerIpLayer := gtpPacket.Layer(layers.LayerTypeIPv4)
-    	if outerIpLayer != nil {
-    	    	oIpPacket,_ := outerIpLayer.(*layers.IPv4)
-    	    	fmt.Println("Original pkt Source IP: ", oIpPacket.SrcIP)
-    	    	fmt.Println("Original pkt Dest IP: ", oIpPacket.DstIP)
-    	    	fmt.Println("Original pkt Protocol: ", oIpPacket.Protocol)
-	}
-
-	outerUdpLayer := gtpPacket.Layer(layers.LayerTypeUDP)
-    	//var originalUdpPort layers.UDPPort
-    	if outerUdpLayer != nil {
-        	oUdp,_ := outerUdpLayer.(*layers.UDP)
-        	fmt.Println("Original pkt Source Port: ", oUdp.SrcPort)
-        	fmt.Println("Original pkt Dest Port: ", oUdp.DstPort)
-    	}
-
-	gtpLayer := gtpPacket.Layer(layers.LayerTypeGTPv1U)
-	//gtpLayer := gopacket.NewPacket(payload, layers.LayerTypeGTPv1U, gopacket.Default)
+	var gtpFlow IpfixGtpFlowData
+	packet, _ := decodeIpv4(payload)
+	gtpLayer := packet.Layer(layers.LayerTypeGTPv1U)
 	if gtpLayer != nil {
 		fmt.Println("============ GTP Layer ============= \n")
 		gtp,_ := gtpLayer.(*layers.GTPv1U)
 		fmt.Println("TEID: ", gtp.TEID)
+		gtpFlow.GtpTeid = gtp.TEID
     		nextLayer := gtp.NextLayerType()
 		if nextLayer == layers.LayerTypeIPv4 {
 			gpayload := gtp.LayerPayload()
-			fmt.Println("Inner pkt Source IP: ", Ipv4Decode(gpayload[12:16]))
-			fmt.Println("Inner pkt Dest IP: ", Ipv4Decode(gpayload[16:20]))
-			fmt.Println("Inner pkt Protocol: ", PortDecode(gpayload[9:10]))
+			gtpFlow.GtpIpSrcAddr = Ipv4Decode(gpayload[12:16])
+			gtpFlow.GtpIpDstAddr = Ipv4Decode(gpayload[16:20])
+			gtpFlow.GtpProtocol = PortDecode(gpayload[9:10])
+			gtpFlow.GtpL4SrcPort = PortDecode(gpayload[20:22])
+			gtpFlow.GtpL4DstPort = PortDecode(gpayload[22:24])
+			fmt.Println(gtpFlow)
+			fmt.Println("----------")
 		}
 
 	}
 
-	/*innerUdpLayer := gtpLayer.Layer(layers.LayerTypeUDP)
-    	//var originalUdpPort layers.UDPPort
-    	if innerUdpLayer != nil {
-        	iUdp,_ := innerUdpLayer.(*layers.UDP)
-        	fmt.Println("Inner pkt Source Port: ", iUdp.SrcPort)
-        	fmt.Println("Inner pkt Dest Port: ", iUdp.DstPort)
-    	}
-	
-	iflow.OuterDstMac = 
-	iflow.OuterSrcMac = 
-	iflow.GtpTeid = PortDecode(payload[6:12]) 
-	iflow.GtpIpSrcAddr = Ipv4Decode(payload[]) 
-	iflow.GtpIpDstAddr = Ipv4Decode(payload[])
-	iflow.GtpProtocol = PortDecode(payload[])
-	iflow.GtpL4SrcPort = PortDecode(payload[])
-	iflow.GtpL4DstPort = PortDecode(payload[])*/
 }
 
 // Decode IPfix packet
@@ -184,6 +174,7 @@ func decodeIpfix(payload []byte) {
 			iflow.IngressIntf = hex.EncodeToString(payload[24:28])
 			iflow.Direction = hex.EncodeToString(payload[28:29])
 			iflow.DataLinkSize = hex.EncodeToString(payload[29:31])
+			fmt.Println("======== Flow data ============\n")
 			fmt.Println("EgressIntf: ", iflow.EgressIntf)
 			fmt.Println("IngressIntf: ", iflow.IngressIntf)
 			fmt.Println("Direction: ", iflow.Direction)
@@ -202,22 +193,14 @@ func decodeIpfix(payload []byte) {
 
 
 func decodePacket(packet gopacket.Packet) {
-    // Flow information to store
-    // Outer Ethernet layer
-    //Outer UdpLayer
 	udpLayer := packet.Layer(layers.LayerTypeUDP)
     	var uDestPort layers.UDPPort
     	if udpLayer != nil {
         	udp,_ := udpLayer.(*layers.UDP)
-        	//fmt.Println("Source Port: ", udp.SrcPort)
-        	//fmt.Println("Dest Port: ", udp.DstPort)
-        	//fmt.Println("UDP Length: ", udp.Length)
         	uDestPort = udp.DstPort
     	}
     	if uDestPort == 1000 {
         	fmt.Println("received ipfix packet...")
-        	//IPfix Layer (payload) decoding
-        	//payload decoded as applicationLayer
         	appLayer := packet.ApplicationLayer()
         	if appLayer != nil {
             		payload := appLayer.Payload()
