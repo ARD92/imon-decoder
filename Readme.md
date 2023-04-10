@@ -3,6 +3,8 @@
 This is an app to decode inline monitoring packets to view GTP tunneled packets. This will offer visibility into the flows encapsulated within GTP headers. The existing feature of Junos where in, if any GTP-U packets arrive, inline jflow would provide flow visibility only on the outer IP header. However there are IPv4 or IPv6 packets encapsulated within GTP headers. In order to obtain flow information, we can leverage inline monitoring which copies the original GTP packet into the data link layer field. 
 This decodes the data link layer field and offer visibility into the exact flow. 
 
+More information on inline monitoring can be read on [official documentation ](https://www.juniper.net/documentation/us/en/software/junos/flow-monitoring/topics/topic-map/inline-monitoring-services-configuration.html)
+
 ## Necessary configuration needed on Junos 
 ```
 set chassis fpc 0 pic 0 inline-services bandwidth 1g
